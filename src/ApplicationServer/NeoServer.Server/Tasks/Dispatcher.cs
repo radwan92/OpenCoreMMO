@@ -9,6 +9,50 @@ using IEvent = NeoServer.Server.Common.Contracts.Tasks.IEvent;
 
 namespace NeoServer.Server.Tasks;
 
+/*
+ * Dispatcher - Single-threaded event queue for thread-safe game state modifications
+ *
+ * PURPOSE:
+ *
+ * 1. Thread Safety
+ *    - All game state changes must happen on the Dispatcher thread
+ *    - Prevents race conditions when multiple network connections try to modify shared game state simultaneously
+ *    - Eliminates the need for locks throughout the codebase
+ *
+ * 2. Serialized Event Processing
+ *    - Uses System.Threading.Channels for lock-free queuing
+ *    - Events are processed one at a time in order
+ *    - Ensures consistent game state by preventing concurrent modifications
+ *
+ * 3. Separation from I/O Operations
+ *    - Network I/O happens on separate threads
+ *    - Database operations happen on PersistenceDispatcher (separate queue)
+ *    - Game logic remains fast and non-blocking
+ *
+ * WHY THIS MATTERS:
+ *
+ * In a multiplayer game server, you might have hundreds of players sending packets simultaneously
+ * (move, attack, use item, etc.). Without the Dispatcher pattern:
+ *   - Multiple threads could modify the same Player/Monster/Map state concurrently
+ *   - You'd need locks everywhere, causing contention and complexity
+ *   - Race conditions could corrupt game state
+ *
+ * With the Dispatcher:
+ *   - All commands execute sequentially on one thread
+ *   - Game logic is simple and deterministic
+ *   - No locks needed in domain layer
+ *
+ * This is a common pattern in game servers and event-driven systems (similar to Node.js event loop
+ * or Redux store updates).
+ *
+ * EVENT FLOW:
+ *
+ * 1. Events are added to the channel via AddEvent()
+ * 2. The processing loop reads events asynchronously
+ * 3. Each event's Action is invoked on the Dispatcher thread
+ * 4. After each event, EventAggregator.PropagateEvents() is called to handle domain events
+ * 5. Expired events (based on timeout) are skipped
+ */
 public class Dispatcher : IDispatcher
 {
     private readonly IEventAggregator _eventAggregator;
